@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Search Assistant</title>
+
+    <!-- Markdown rendering and HTML sanitization -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f9;
+            color: #1f2937;
+        }
+
+        .container {
+            max-width: 850px;
+            margin: 50px auto;
+            padding: 24px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #6b7280;
+            margin-bottom: 30px;
+        }
+
+        .panel {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 16px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        textarea:focus {
+            outline: 2px solid #93c5fd;
+            border-color: #2563eb;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+        }
+
+        select {
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: white;
+        }
+
+        button {
+            padding: 11px 20px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 7px;
+            cursor: pointer;
+            font-size: 15px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        #status {
+            margin-top: 18px;
+            color: #6b7280;
+            white-space: pre-wrap;
+        }
+
+        #result {
+            margin-top: 24px;
+            padding: 24px;
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            line-height: 1.7;
+            overflow-wrap: anywhere;
+        }
+
+        #result:empty {
+            display: none;
+        }
+
+        #result h1,
+        #result h2,
+        #result h3 {
+            text-align: left;
+            margin-top: 24px;
+        }
+
+        #result h1:first-child,
+        #result h2:first-child,
+        #result h3:first-child {
+            margin-top: 0;
+        }
+
+        #result pre {
+            background: #111827;
+            color: #f9fafb;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        #result code {
+            font-family: Consolas, monospace;
+        }
+
+        #result :not(pre) > code {
+            background: #f3f4f6;
+            padding: 3px 6px;
+            border-radius: 4px;
+        }
+
+        #result blockquote {
+            border-left: 4px solid #93c5fd;
+            margin-left: 0;
+            padding-left: 16px;
+            color: #4b5563;
+        }
+
+        #result table {
+            width: 100%;
+            border-collapse: collapse;
+            display: block;
+            overflow-x: auto;
+        }
+
+        #result th,
+        #result td {
+            border: 1px solid #d1d5db;
+            padding: 8px 12px;
+            text-align: left;
+        }
+
+        #result th {
+            background: #f3f4f6;
+        }
+
+        #result img {
+            max-width: 100%;
+        }
+
+        #result a {
+            color: #2563eb;
+        }
+
+        .error {
+            color: #dc2626 !important;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                margin: 20px auto;
+                padding: 14px;
+            }
+
+            .panel {
+                padding: 16px;
+            }
+
+            #result {
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Kanoon RAG</h1>
+        <p class="subtitle">
+            Ask questions about the constitution and get summarized answers.
+        </p>
+
+        <div class="panel">
+            <form id="searchForm">
+                <label for="query">Your question</label>
+
+                <textarea
+                    id="query"
+                    placeholder="How is the head of election commission selected in Nepal?"
+                    required
+                ></textarea>
+
+                <div class="controls">
+                    <label for="topK" style="margin: 0;">Top K:</label>
+
+                    <select id="topK">
+                        <option value="1">1</option>
+                        <option value="3" selected>3</option>
+                        <option value="5">5</option>
+                        <option value="10">10</option>
+                    </select>
+
+                    <button type="submit" id="searchButton">
+                        Search
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <p id="status" role="status" aria-live="polite"></p>
+
+        <div
+            id="result"
+            aria-label="Search result"
+        ></div>
+    </div>
+
+    <script>
+        const form = document.getElementById("searchForm");
+        const queryInput = document.getElementById("query");
+        const topKInput = document.getElementById("topK");
+        const searchButton = document.getElementById("searchButton");
+        const statusElement = document.getElementById("status");
+        const resultElement = document.getElementById("result");
+
+        // Configure Markdown rendering.
+        marked.setOptions({
+            gfm: true,
+            breaks: false
+        });
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const query = queryInput.value.trim();
+            const topK = Number(topKInput.value);
+
+            if (!query) {
+                statusElement.textContent = "Please enter a question.";
+                statusElement.className = "error";
+                return;
+            }
+
+            searchButton.disabled = true;
+            searchButton.textContent = "Searching...";
+            statusElement.className = "";
+            statusElement.textContent = "Searching your documents...";
+            resultElement.replaceChildren();
+
+            try {
+                const response = await fetch("/search", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        top_k: topK
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.detail || "Failed to search documents."
+                    );
+                }
+
+                // Convert Markdown into HTML, then sanitize it.
+                const renderedMarkdown = marked.parse(
+                    String(data.summary ?? "")
+                );
+
+                resultElement.innerHTML = DOMPurify.sanitize(
+                    renderedMarkdown
+                );
+
+                statusElement.textContent = "Answer generated successfully.";
+
+            } catch (error) {
+                statusElement.className = "error";
+                statusElement.textContent = error.message;
+            } finally {
+                searchButton.disabled = false;
+                searchButton.textContent = "Search";
+            }
+        });
+    </script>
+</body>
+</html>
